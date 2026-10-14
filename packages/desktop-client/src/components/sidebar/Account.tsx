@@ -1,6 +1,6 @@
 // @ts-strict-ignore
 import React, { useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AlignedText } from '@actual-app/components/aligned-text';
@@ -17,8 +17,12 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { Tooltip } from '@actual-app/components/tooltip';
 import { View } from '@actual-app/components/view';
+import { tsToRelativeTime } from '@actual-app/core/shared/util';
 import type { AccountEntity } from '@actual-app/core/types/models';
 import { css, cx } from '@emotion/css';
+import { format as formatDate } from 'date-fns';
+import type { Locale } from 'date-fns';
+import type { TFunction } from 'i18next';
 
 import { useReopenAccountMutation, useUpdateAccountMutation } from '#accounts';
 import { BalanceHistoryGraph } from '#components/accounts/BalanceHistoryGraph';
@@ -28,13 +32,16 @@ import { DropHighlight, useDraggable, useDroppable } from '#components/sort';
 import type { OnDragChangeCallback, OnDropCallback } from '#components/sort';
 import { CellValue } from '#components/spreadsheet/CellValue';
 import { useContextMenu } from '#hooks/useContextMenu';
+import { useDateFormat } from '#hooks/useDateFormat';
 import { useDragRef } from '#hooks/useDragRef';
 import { useIsTestEnv } from '#hooks/useIsTestEnv';
+import { useLocale } from '#hooks/useLocale';
 import { useNotes } from '#hooks/useNotes';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { openAccountCloseModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
 import type { Binding, SheetFields } from '#spreadsheet';
+import * as bindings from '#spreadsheet/bindings';
 import { isTouchDevice } from '#util/isTouchDevice';
 
 export const accountNameStyle: CSSProperties = {
@@ -68,6 +75,51 @@ type AccountProps<FieldName extends SheetFields<'account'>> = {
   balanceTestId?: string;
 };
 
+function getAccountTypeLabel(account: AccountEntity, t: TFunction) {
+  if (account.closed) {
+    return t('Closed');
+  }
+
+  return account.offbudget ? t('Off budget') : t('On budget');
+}
+
+function getLastReconciledText(
+  lastReconciled: AccountEntity['last_reconciled'],
+  dateFormat: string,
+  locale: Locale,
+  t: TFunction,
+) {
+  if (!lastReconciled) {
+    return t('Not yet reconciled');
+  }
+
+  return t('{{ relativeTimeAgo }} ({{ absoluteDate }})', {
+    relativeTimeAgo: tsToRelativeTime(lastReconciled, locale),
+    absoluteDate: formatDate(
+      new Date(parseInt(lastReconciled, 10)),
+      dateFormat,
+      {
+        locale,
+      },
+    ),
+  });
+}
+
+function AccountTooltipInfo({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <SpaceBetween gap={12} style={{ justifyContent: 'space-between' }}>
+      <Text style={{ color: theme.pageTextLight }}>{label}</Text>
+      <Text style={{ textAlign: 'right' }}>{value}</Text>
+    </SpaceBetween>
+  );
+}
+
 export function Account<FieldName extends SheetFields<'account'>>({
   name,
   account,
@@ -87,6 +139,8 @@ export function Account<FieldName extends SheetFields<'account'>>({
 }: AccountProps<FieldName>) {
   const isTestEnv = useIsTestEnv();
   const { t } = useTranslation();
+  const dateFormat = useDateFormat() || 'MM/dd/yyyy';
+  const locale = useLocale();
   const type = account
     ? account.closed
       ? 'account-closed'
@@ -125,6 +179,10 @@ export function Account<FieldName extends SheetFields<'account'>>({
   const updateAccount = useUpdateAccountMutation();
 
   const balanceCell = <CellValue binding={query} type="financial" />;
+  const accountTypeLabel = account ? getAccountTypeLabel(account, t) : null;
+  const lastReconciledText = account
+    ? getLastReconciledText(account.last_reconciled, dateFormat, locale, t)
+    : null;
 
   const isContextMenuOpen = useSelector(state =>
     state.contextMenu.items.some(
@@ -134,7 +192,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
   );
   useContextMenu({
     triggerRef,
-    enabled: account != null && needsTooltip,
+    enabled: account != null,
     items: [
       {
         name: 'account-rename',
@@ -322,6 +380,52 @@ export function Account<FieldName extends SheetFields<'account'>>({
               </SpaceBetween>
             </Button>
           </SpaceBetween>
+          {account && accountTypeLabel && lastReconciledText && (
+            <View
+              style={{
+                gap: 4,
+                marginTop: 8,
+                minWidth: 260,
+              }}
+            >
+              <AccountTooltipInfo
+                label={t('Current balance')}
+                value={<CellValue binding={query} type="financial" />}
+              />
+              <AccountTooltipInfo
+                label={t('Cleared total')}
+                value={
+                  <CellValue
+                    binding={bindings.accountBalanceCleared(account.id)}
+                    type="financial"
+                  />
+                }
+              />
+              <AccountTooltipInfo
+                label={t('Uncleared total')}
+                value={
+                  <CellValue
+                    binding={bindings.accountBalanceUncleared(account.id)}
+                    type="financial"
+                  />
+                }
+              />
+              <View
+                style={{
+                  borderTop: `1px solid ${theme.tableBorder}`,
+                  marginBlock: 4,
+                }}
+              />
+              <AccountTooltipInfo
+                label={t('Status')}
+                value={accountTypeLabel}
+              />
+              <AccountTooltipInfo
+                label={t('Last reconciled')}
+                value={lastReconciledText}
+              />
+            </View>
+          )}
           {showBalanceHistory === 'true' && account && (
             <BalanceHistoryGraph
               accountId={account.id}

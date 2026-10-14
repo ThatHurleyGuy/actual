@@ -25,8 +25,9 @@ vi.mock(
 
 // jsdom does not implement matchMedia, which the component uses for
 // touch-device detection
+let isTouchDevice = false;
 window.matchMedia = (query: string): MediaQueryList => ({
-  matches: false,
+  matches: isTouchDevice,
   media: query,
   onchange: null,
   addListener: vi.fn(),
@@ -40,6 +41,7 @@ describe('sidebar Account context menu', () => {
   let store: ReturnType<typeof configureTestAppStore>;
 
   beforeEach(() => {
+    isTouchDevice = false;
     initServer({
       query: async () => ({ data: [], dependencies: [] }),
       'get-cell': async () => ({ name: 'test-cell', value: 0 }),
@@ -102,6 +104,41 @@ describe('sidebar Account context menu', () => {
   });
 
   it('opens rename/close on an account row', async () => {
+    const account = generateAccount('Bank of America');
+
+    await renderRow(
+      <Account
+        name={account.name}
+        account={account}
+        to={`/accounts/${account.id}`}
+        query={bindings.accountBalance(account.id)}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText('Bank of America'));
+
+    expect(store.getState().contextMenu.isOpen).toBe(true);
+    expect(contextMenuItemNames()).toEqual(['account-rename', 'account-close']);
+  });
+
+  it('renders a reconciled account before date preferences load', async () => {
+    const account = generateAccount('Bank of America');
+    account.last_reconciled = Date.now().toString();
+
+    await renderRow(
+      <Account
+        name={account.name}
+        account={account}
+        to={`/accounts/${account.id}`}
+        query={bindings.accountBalance(account.id)}
+      />,
+    );
+
+    expect(screen.getByText('Bank of America')).toBeInTheDocument();
+  });
+
+  it('opens rename/close on a touch device', async () => {
+    isTouchDevice = true;
     const account = generateAccount('Bank of America');
 
     await renderRow(
